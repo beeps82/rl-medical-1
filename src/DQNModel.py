@@ -3,82 +3,6 @@ import torch.nn as nn
 from torch_geometric.nn import GCNConv
 
 
-class Network2D(nn.Module):
-
-    def __init__(self, agents, frame_history, number_actions):
-        super(Network2D, self).__init__()
-        self.agents = agents
-        self.frame_history = frame_history
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
-
-        self.conv0 = nn.Conv3d(
-            in_channels=frame_history,
-            out_channels=32,
-            kernel_size=(5, 5, 5)).to(
-            self.device)
-        self.maxpool0 = nn.MaxPool3d(kernel_size=(2, 2, 2)).to(self.device)
-        self.prelu0 = nn.PReLU().to(self.device)
-        self.conv1 = nn.Conv3d(
-            in_channels=32,
-            out_channels=32,
-            kernel_size=(5, 5, 5)).to(
-            self.device)
-        self.maxpool1 = nn.MaxPool3d(kernel_size=(2, 2, 2)).to(self.device)
-        self.prelu1 = nn.PReLU().to(self.device)
-        self.conv2 = nn.Conv3d(
-            in_channels=32,
-            out_channels=64,
-            kernel_size=(4, 4, 4)).to(
-            self.device)
-        self.maxpool2 = nn.MaxPool3d(kernel_size=(2, 2, 2)).to(self.device)
-        self.prelu2 = nn.PReLU().to(self.device)
-        self.conv3 = nn.Conv3d(
-            in_channels=64,
-            out_channels=64,
-            kernel_size=(3, 3, 3)).to(
-            self.device)
-        self.prelu3 = nn.PReLU().to(self.device)
-
-        self.fc1 = nn.Linear(in_features=512, out_features=256).to(self.device)
-        self.prelu4 = nn.LeakyReLU().to(self.device)
-        self.fc2 = nn.Linear(in_features=256, out_features=128).to(self.device)
-        self.prelu5 = nn.LeakyReLU().to(self.device)
-        self.fc3 = nn.Linear(
-            in_features=128,
-            out_features=number_actions).to(
-            self.device)
-
-    def forward(self, input):
-        """
-        Input is a tensor of size
-        (batch_size, agents, frame_history, *image_size)
-        """
-        input = input.to(self.device) / 255.0
-
-        # Shared layers
-        x = input.squeeze(1)  # input[:, 0]
-        x = self.conv0(x)
-        x = self.prelu0(x)
-        x = self.maxpool0(x)
-        x = self.conv1(x)
-        x = self.prelu1(x)
-        x = self.maxpool1(x)
-        x = self.conv2(x)
-        x = self.prelu2(x)
-        x = self.maxpool2(x)
-        x = x.view(-1, 512)
-
-        # Individual layers
-        x = self.fc1(x)
-        x = self.prelu4(x)
-        x = self.fc2(x)
-        x = self.prelu5(x)
-        x = self.fc3(x)
-        output = x.unsqueeze(1)
-        return output.cpu()
-
-
 class Network3D(nn.Module):
 
     def __init__(self, agents, frame_history, number_actions, xavier=True):
@@ -147,7 +71,7 @@ class Network3D(nn.Module):
         Output is a tensor of size
         (batch_size, agents, number_actions)
         """
-        input = input.to(self.device) / 255.0
+        input = input[0].to(self.device) / 255.0
         output = []
         for i in range(self.agents):
             # Shared layers
@@ -354,7 +278,7 @@ class CommNet(nn.Module):
         # Output is a tensor of size
         (batch_size, agents, number_actions)
         """
-        input1 = input.to(self.device) / 255.0
+        input1 = input[0].to(self.device) / 255.0
 
         # Shared layers
         input2 = []
@@ -410,6 +334,7 @@ class GraphNet(nn.Module):
 
         self.agents = agents
         self.frame_history = frame_history
+        self.number_actions = number_actions
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
 
@@ -469,13 +394,17 @@ class GraphNet(nn.Module):
         self.gcn1 = GCNConv(512, 128).to(self.device)
         self.gcn2 = GCNConv(128, 16).to(self.device)
 
+        self.fc_last = nn.Linear(
+                in_features=16*agents,
+                out_features=number_actions*agents).to(
+                self.device)
+
         self.edge_index = []
         for i in range(self.agents):
             for j in range(self.agents):
                 if i == j: continue
                 self.edge_index.append([i, j])
         self.edge_index = torch.tensor(self.edge_index).t().contiguous().to(self.device)
-        print("self.edge_index", self.edge_index)
 
         if xavier:
             for module in self.modules():
@@ -515,13 +444,9 @@ class GraphNet(nn.Module):
         comm = self.prelu4(comm)
         comm = self.gcn2(comm, self.edge_index)
         comm = self.prelu5(comm)
-        print("comm", comm.shape)
-        comm = comm.permute(1,0,2)
-        print("comm", comm.shape)
-        comm = comm.view(comm.shape[0], -1) # comm is now of shape (agents, frame_history*16)
-        print("comm", comm.shape)
-
-        return output.cpu()
+        comm = comm.reshape(comm.shape[0], -1) # comm is now of shape (agents, frame_history*16)
+        output = self.fc_last(comm)
+        return output.view(*output.shape[:-1], self.agents, self.number_actions).cpu()
 
 
 class DQN:
