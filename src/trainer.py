@@ -24,6 +24,7 @@ class Trainer(object):
                  number_actions=6,
                  frame_history=4,
                  model_name="CommNet",
+                 graph_type="GCNConv"
                  logger=None,
                  train_freq=1,
                  ):
@@ -54,7 +55,8 @@ class Trainer(object):
             self.agents,
             self.frame_history,
             logger=logger,
-            type=model_name)
+            type=model_name,
+            graph_type=graph_type)
         self.dqn.q_network.train(True)
         self.evaluator = Evaluator(eval_env,
                                    self.dqn.q_network,
